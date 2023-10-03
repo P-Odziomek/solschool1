@@ -17,11 +17,11 @@ const config: HardhatUserConfig = {
     hardhat: {
       forking: {
         enabled: true,
-        url: `https://mainnet.infura.io/v3/${process.env.INFURA_MAINNET_KEY}`,
+        url: `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
       }
     },
     sepolia: {
-      url: `https://sepolia.infura.io/v3/${process.env.INFURA_MAINNET_KEY}`,
+      url: `https://sepolia.infura.io/v3/${process.env.INFURA_KEY}`,
       accounts: {
         mnemonic: process.env.SEPOLIA_MNEMONIC,
         path: "m/44'/60'/0'/0",
@@ -31,9 +31,9 @@ const config: HardhatUserConfig = {
       },
     }
   },
-  etherscan: {
-    apiKey: process.env.ETHERSCAN_API_KEY
-  },
+  // etherscan: {
+  //   apiKey: process.env.ETHERSCAN_API_KEY
+  // },
   // gasReporter: {
   //   enabled: true,
   //   currency: "USD",
