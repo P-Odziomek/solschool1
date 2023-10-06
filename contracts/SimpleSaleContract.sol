@@ -18,6 +18,9 @@ contract SimpleSaleContract is Ownable {
 
     MeetupERC20Token public mintableToken;
     mapping(IERC20 => uint256) paymentTokensExchangeRate;
+    address[] public paymentTokens;
+
+    uint256 public exchangeRateEth = 0;
 
     event SaleCompleted(address indexed beneficiary, uint256 tokensBought, address indexed paymentToken, uint256 tokensPaid);
     event TokenExchangeRateSet(address indexed token, uint256 exchangeRate);
@@ -40,11 +43,23 @@ contract SimpleSaleContract is Ownable {
         require(paymentTokensExchangeRate[IERC20(_paymentToken)] > 0, "Payment token not allowed");
 
         uint256 tokensToPay = _tokensToBuy * paymentTokensExchangeRate[IERC20(_paymentToken)];
+
         IERC20(_paymentToken).safeTransferFrom(msg.sender, address(this), tokensToPay);
-        
         mintableToken.mint(msg.sender, _tokensToBuy);
 
         emit SaleCompleted(msg.sender, _tokensToBuy, _paymentToken, tokensToPay);
+    }
+
+
+    function buyTokensWithEth() external payable {
+        uint256 tokensToPay = msg.value * exchangeRateEth;
+        mintableToken.mint(msg.sender, tokensToPay);
+        emit SaleCompleted(msg.sender, msg.value, address(0), tokensToPay);
+    }
+
+    function setPaymentTokenExchangeRateEth(uint256 _exchangeRate) public onlyOwner {
+        exchangeRateEth = _exchangeRate;
+        emit TokenExchangeRateSet(address(0), _exchangeRate);
     }
 
     /**
@@ -56,7 +71,31 @@ contract SimpleSaleContract is Ownable {
         require(_paymentToken != address(0), "Payment token not set");
 
         paymentTokensExchangeRate[IERC20(_paymentToken)] = _exchangeRate;
+        paymentTokens.push(_paymentToken);
 
         emit TokenExchangeRateSet(_paymentToken, _exchangeRate);
+    }
+
+    function withdrawTokens() public onlyOwner {
+
+        if (mintableToken.mintingAllowed()) {
+            revert("Minting not finished");
+        }
+
+        for (uint i; i < paymentTokens.length; i++) {
+            IERC20(paymentTokens[i]).safeTransfer(owner(), IERC20(paymentTokens[i]).balanceOf(address(this)));
+        }
+    }
+
+    function withdrawEth() public onlyOwner {
+        payable(owner()).transfer(address(this).balance);
+    }
+
+    function getEthBalance() public view returns (uint256) {
+        return address(this).balance;
+    }
+
+    function getEthBalanceOwner() public view returns (uint256) {
+        return address(owner()).balance;
     }
 }
