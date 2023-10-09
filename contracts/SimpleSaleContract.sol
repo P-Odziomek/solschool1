@@ -6,6 +6,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./MeetupERC20Token.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+import "hardhat/console.sol";
+
+interface Weth is IERC20 {
+    function deposit() external payable;
+    function withdraw(uint wad) external;
+}
+
 /**
  * @title Solidity Code School sale contract
  * @dev a demo contract for token sale to prove the importance of using SafeERC20
@@ -21,6 +28,7 @@ contract SimpleSaleContract is Ownable {
         uint256 partsMint;
     }
 
+    IERC20 internal constant WETH = IERC20(address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2));
     uint256 public immutable cutoffTimestamp;
     MeetupERC20Token public mintableToken;
     // is it better to specity the default visibility modifier public or omit it?
@@ -28,11 +36,13 @@ contract SimpleSaleContract is Ownable {
     mapping(IERC20 => ExchangeRate) public paymentTokensExchangeRate;
     ExchangeRate public etherExchangeRate;
 
-    event TokenSaleCompleted(address indexed beneficiary, uint256 tokensBought, address indexed paymentToken, uint256 tokensPaid);
+    event TokenSaleCompleted(address indexed beneficiary, uint256 tokensBought, IERC20 indexed paymentToken, uint256 tokensPaid);
     event EtherSaleCompleted(address indexed beneficiary, uint256 tokensBought, uint256 etherPaid);
-    event TokenExchangeRateSet(address indexed token, uint256 partsSellToken, uint256 partsMintToken);
+    event TokenExchangeRateSet(IERC20 indexed token, uint256 partsSellToken, uint256 partsMintToken);
     event EtherExchangeRateSet(uint256 partsSellEther, uint256 partsMintToken);
-    event TokensWithdrawn(address indexed token, uint256 value);
+    event TokensWithdrawn(IERC20 indexed token, uint256 value);
+
+    error BadEthValue();
 
     /**
      * @notice contract constructor
@@ -44,21 +54,46 @@ contract SimpleSaleContract is Ownable {
         cutoffTimestamp = block.timestamp + _saleDurationDays * 1 days;
     }
 
+    modifier rateSet(IERC20 token) {
+        require(paymentTokensExchangeRate[token].partsSell != 0, "Payment token not allowed");
+        require(paymentTokensExchangeRate[token].partsMint != 0, "Payment token not allowed");
+        _;
+    }
+
+    modifier forSale() {
+        require(block.timestamp < cutoffTimestamp, "Sale is not possible anymore");
+        _;
+    }
+
+    modifier positiveTokens(uint256 value) {
+        require(value != 0, "Tokens value should be positive");
+        _;
+    }
+
     /**
-     * @notice Transfers mintableTokens to msg.sender for a specified exchange rate. Reverts if payment token is not specified.
+     * @notice In exchange for _paymentToken, mintableTokens will be transferred to msg.sender at a specified exchange rate.
+     * Reverts if payment token is not specified.
      * @param _tokensToBuy amount of mintable tokens to be bought
      * @param _paymentToken the token that will be used for payment
      */
-    function buyTokens(uint256 _tokensToBuy, address _paymentToken) external {
-        require(_tokensToBuy > 0, "No tokens bought");
-        require(paymentTokensExchangeRate[IERC20(_paymentToken)].partsSell > 0, "Payment token not allowed");
-        require(block.timestamp < cutoffTimestamp, "Sale is not possible anymore");
+    function buyTokens(uint256 _tokensToBuy, IERC20 _paymentToken) external forSale positiveTokens(_tokensToBuy) rateSet(_paymentToken) {
+        require(_tokensToBuy != 0, "No tokens bought");
+        _buyTokens(_tokensToBuy, _paymentToken);
+    }
 
-        // Why aren't we checking overflowing here?
+    /**
+     * @notice In exchange for _paymentToken, mintableTokens will be transferred to msg.sender at a specified exchange rate.
+     * Reverts if payment token is not specified.
+     * @param _tokensToBuy amount of mintable tokens to be bought
+     * @param _paymentToken the token that will be used for payment
+     */
+    function _buyTokens(uint256 _tokensToBuy, IERC20 _paymentToken) internal {
         uint256 tokensToPay = _tokensToBuy 
-            * paymentTokensExchangeRate[IERC20(_paymentToken)].partsSell
-            / paymentTokensExchangeRate[IERC20(_paymentToken)].partsMint;
-        IERC20(_paymentToken).safeTransferFrom(msg.sender, address(this), tokensToPay);
+            * paymentTokensExchangeRate[_paymentToken].partsSell
+            / paymentTokensExchangeRate[_paymentToken].partsMint;
+        console.log(_paymentToken.balanceOf(msg.sender));
+        console.log(_paymentToken.allowance(msg.sender, address(this)));
+        _paymentToken.safeTransferFrom(msg.sender, address(this), tokensToPay);
         
         mintableToken.mint(msg.sender, _tokensToBuy);
 
@@ -66,68 +101,59 @@ contract SimpleSaleContract is Ownable {
     }
 
     /**
-     * @notice admin function for setting payment token
+     * @notice admin function for setting payment token exchange rate
      * @param _paymentToken address of token to be set
      * @param _partsSellToken parts of the token that is sold to be converted into _partsMintToken
      * @param _partsMintToken parts of the token that is minted in exchage of _partsSellToken
      */
-    function setPaymentTokenExchangeRate(address _paymentToken, uint256 _partsSellToken, uint256 _partsMintToken) external onlyOwner {
-        require(_paymentToken != address(0), "Payment token is invalid");
-        require(_partsSellToken > 0 && _partsMintToken > 0, "Invalid exchange rate");
+    function setPaymentTokenExchangeRate(IERC20 _paymentToken, uint256 _partsSellToken, uint256 _partsMintToken) external onlyOwner {
+        require(address(_paymentToken) != address(0), "Payment token is invalid");
+        require(_partsSellToken != 0, "Invalid exchange rate");
+        require(_partsMintToken != 0, "Invalid exchange rate");
 
-        paymentTokensExchangeRate[IERC20(_paymentToken)].partsSell = _partsSellToken;
-        paymentTokensExchangeRate[IERC20(_paymentToken)].partsMint = _partsMintToken;
+        paymentTokensExchangeRate[_paymentToken].partsSell = _partsSellToken;
+        paymentTokensExchangeRate[_paymentToken].partsMint = _partsMintToken;
 
         emit TokenExchangeRateSet(_paymentToken, _partsSellToken, _partsMintToken);
+    }
+
+    /**
+     * @notice admin function for unsetting payment token exchange rate
+     * @param _paymentToken address of token to be unset
+     */
+    function unsetPaymentTokenExchangeRate(IERC20 _paymentToken) external onlyOwner {
+        // Is it cheaper to call delete than x.a=0, x.b=0?
+        delete paymentTokensExchangeRate[_paymentToken];
     }
 
     /**
      * @notice admin function to withdraw contract balance of a certain token
      * @param _token address of a token
      */
-    function withdraw(address _token) external onlyOwner {
-        // Is this check necessary?
-        require(paymentTokensExchangeRate[IERC20(_token)].partsMint > 0, "Such a token was not registered");
+    function withdraw(IERC20 _token) external onlyOwner {
+        require(block.timestamp >= cutoffTimestamp, "Sale is still ongoing");
 
-        uint256 balance = IERC20(_token).balanceOf(address(this));
-        IERC20(_token).safeTransfer(msg.sender, balance);
+        uint256 balance = _token.balanceOf(address(this));
+        _token.safeTransfer(msg.sender, balance);
 
         emit TokensWithdrawn(_token, balance);
-    }
-
-    /**
-     * @notice admin function for setting exchange rate of ether
-     * @param _partsSellEther parts of ether that is sold to be converted into _partsMintToken
-     * @param _partsMintToken parts of the token that is minted in exchage of _partsSellEther
-     */
-    function setPaymentEtherExchangeRate(uint256 _partsSellEther, uint256 _partsMintToken) external onlyOwner {
-        require(_partsSellEther > 0 && _partsMintToken > 0, "Invalid exchange rate");
-
-        etherExchangeRate.partsSell = _partsSellEther;
-        etherExchangeRate.partsMint = _partsMintToken;
-
-        emit EtherExchangeRateSet(_partsSellEther, _partsMintToken);
     }
 
     /**
      * @notice Transfers mintableTokens to msg.sender for a specified exchange rate of ether
      * @param _tokensToBuy number of mintable tokens to be bought
      */
-    function buyTokensForEther(uint256 _tokensToBuy) external payable {
-        require(_tokensToBuy > 0, "Invalid number of tokens to buy");
-        require(etherExchangeRate.partsSell > 0, "Payment with ether is not allowed");
-        require(block.timestamp < cutoffTimestamp, "Sale is not possible anymore");
-
+    function buyTokensForEther(uint256 _tokensToBuy) external payable forSale positiveTokens(_tokensToBuy) rateSet(WETH) {
         uint256 etherToPay = _tokensToBuy 
-            * etherExchangeRate.partsSell
-            / etherExchangeRate.partsMint;
+            * paymentTokensExchangeRate[WETH].partsSell
+            / paymentTokensExchangeRate[WETH].partsMint;
         
         if (msg.value != etherToPay) {
-            revert("Incorrect value of ether for the specified number of tokens");
+            revert BadEthValue();
         }
 
-        mintableToken.mint(msg.sender, _tokensToBuy);
-
-        emit EtherSaleCompleted(msg.sender, _tokensToBuy, etherToPay);
+        Weth(address(WETH)).deposit{value: msg.value}();
+        WETH.approve(address(this), msg.value);
+        _buyTokens(_tokensToBuy, WETH);
     }
 }

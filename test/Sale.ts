@@ -16,6 +16,7 @@ const USDT_MINT_PARTS_EXCHANGE_RATE = 7;
 const DAI_MAINNET_CONTRACT_ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f";
 const USDC_MAINNET_CONTRACT_ADDRESS = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const USDT_MAINNET_CONTRACT_ADDRESS = "0xdac17f958d2ee523a2206206994597c13d831ec7";
+const WETH_MAINNET_CONTRACT_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 
 
 describe ("Token Sales Test", function() {
@@ -28,18 +29,16 @@ describe ("Token Sales Test", function() {
     const meetupToken = await ethers.deployContract("MeetupERC20Token", [cap]);
     const salesContract = await ethers.deployContract("SimpleSaleContract", [await meetupToken.getAddress(), saleDurationDays]);
 
-    // How can a transfer be performed in real life?
-    // Why doesn't the sales contract deploy the meetup contract instead?
-    // If Sales contract would deploy the Meetup contract, would it become its owner?
     await meetupToken.transferOwnership(await salesContract.getAddress());
 
     await salesContract.setPaymentTokenExchangeRate(DAI_MAINNET_CONTRACT_ADDRESS, DAI_PARTS_EXCHANGE_RATE, DAI_MINT_PARTS_EXCHANGE_RATE); // DAI
     await salesContract.setPaymentTokenExchangeRate(USDC_MAINNET_CONTRACT_ADDRESS, USDC_PARTS_EXCHANGE_RATE, USDC_MINT_PARTS_EXCHANGE_RATE); // USDC
     await salesContract.setPaymentTokenExchangeRate(USDT_MAINNET_CONTRACT_ADDRESS, USDT_PARTS_EXCHANGE_RATE, USDT_MINT_PARTS_EXCHANGE_RATE); // USDT
 
-    const usdt = ERC20__factory.connect("0xdac17f958d2ee523a2206206994597c13d831ec7", ethers.provider);
-    const usdc = ERC20__factory.connect("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", ethers.provider);
-    const dai = ERC20__factory.connect("0x6b175474e89094c44da98b954eedeac495271d0f", ethers.provider);
+    const dai = ERC20__factory.connect(DAI_MAINNET_CONTRACT_ADDRESS, ethers.provider);
+    const usdc = ERC20__factory.connect(USDC_MAINNET_CONTRACT_ADDRESS, ethers.provider);
+    const usdt = ERC20__factory.connect(USDT_MAINNET_CONTRACT_ADDRESS, ethers.provider);
+    const weth = ERC20__factory.connect(WETH_MAINNET_CONTRACT_ADDRESS, ethers.provider);
 
     // const mockWallet = ethers.Wallet.createRandom().connect(ethers.provider);
     // await setBalance(mockWallet.address, 10000000000000000000);
@@ -55,6 +54,7 @@ describe ("Token Sales Test", function() {
       usdt,
       usdc,
       dai,
+      weth,
       // mockContract,
     };
   }
@@ -80,7 +80,7 @@ describe ("Token Sales Test", function() {
         .to.be.revertedWith("Payment token is invalid");
     });
 
-    it("Should revert when the exchange rate is invalid", async () => {
+    it("Should revert when parts sell is invalid", async () => {
       const { salesContract } = await loadFixture(deployContracts);
 
       const golem = "0xa74476443119A942dE498590Fe1f2454d7D4aC0d";
@@ -89,30 +89,49 @@ describe ("Token Sales Test", function() {
       await expect(salesContract.setPaymentTokenExchangeRate(golem, partsSell, partsMint))
         .to.be.revertedWith("Invalid exchange rate");
     });
-  });
 
-  describe("Ether exchange rate", () => {
-    it("Should set ether exchange rate", async () => {
+    it("Should revert when parts mint is invalid", async () => {
       const { salesContract } = await loadFixture(deployContracts);
 
-      const partsSell = ethers.toBigInt(4);
-      const partsMint = ethers.toBigInt(11);
-      await salesContract.setPaymentEtherExchangeRate(partsSell, partsMint);
-      expect(await salesContract.etherExchangeRate()).to.contain(partsSell).and.to.contain(partsMint);
-    });
-
-    it("Should revert when the exchange rate is invalid", async () => {
-      const { salesContract } = await loadFixture(deployContracts);
-
-      const partsSell = ethers.toBigInt(0);
-      const partsMint = ethers.toBigInt(11);
-      await expect(salesContract.setPaymentEtherExchangeRate(partsSell, partsMint))
+      const golem = "0xa74476443119A942dE498590Fe1f2454d7D4aC0d";
+      const partsSell = ethers.toBigInt(14);
+      const partsMint = ethers.toBigInt(0);
+      await expect(salesContract.setPaymentTokenExchangeRate(golem, partsSell, partsMint))
         .to.be.revertedWith("Invalid exchange rate");
     });
   });
 
-  describe("Buy tokens for tokens cases", function () {
-    it ("Should buy test token for DAI", async function () {
+  describe("Unset token exchange rate", () => {
+    it("Should unset token exchange rate", async () => {
+      const { salesContract } = await loadFixture(deployContracts);
+
+      const golem = "0xa74476443119A942dE498590Fe1f2454d7D4aC0d";
+      const partsSell = ethers.toBigInt(4);
+      const partsMint = ethers.toBigInt(11);
+      await salesContract.setPaymentTokenExchangeRate(golem, partsSell, partsMint);
+      await salesContract.unsetPaymentTokenExchangeRate(golem);
+      expect(await salesContract.paymentTokensExchangeRate(golem)).to.contain(ethers.toBigInt(0)).and.to.contain(ethers.toBigInt(0));
+    });
+
+    it("Should unset token exchange rate even if it was not set", async () => {
+      const { salesContract } = await loadFixture(deployContracts);
+
+      const golem = "0xa74476443119A942dE498590Fe1f2454d7D4aC0d";
+      await salesContract.unsetPaymentTokenExchangeRate(golem);
+      expect(await salesContract.paymentTokensExchangeRate(golem)).to.contain(ethers.toBigInt(0)).and.to.contain(ethers.toBigInt(0));
+    });
+
+    it("Should revoke if not the owner is calling", async () => {
+      const { salesContract } = await loadFixture(deployContracts);
+
+      const [, notOwner] = await ethers.getSigners();
+      const golem = "0xa74476443119A942dE498590Fe1f2454d7D4aC0d";
+      await expect(salesContract.connect(notOwner).unsetPaymentTokenExchangeRate(golem)).to.be.revertedWith("Ownable: caller is not the owner");
+    });
+  });
+
+  describe("Buy tokens for tokens", function () {
+    it("Should buy test token for DAI", async function () {
       const tokensToBuy = 5;
 
       const { meetupToken, salesContract, dai, } = await loadFixture(deployContracts);
@@ -128,7 +147,7 @@ describe ("Token Sales Test", function() {
       expect(await dai.balanceOf(await salesContract.getAddress())).to.equal(tokensToBuy * DAI_PARTS_EXCHANGE_RATE / DAI_MINT_PARTS_EXCHANGE_RATE);
     })
 
-    it ("Should buy test token for USDC", async function () {
+    it("Should buy test token for USDC", async function () {
       const tokensToBuy = 5;
 
       const { meetupToken, salesContract, usdc, } = await loadFixture(deployContracts);
@@ -144,7 +163,7 @@ describe ("Token Sales Test", function() {
       expect(await usdc.balanceOf(await salesContract.getAddress())).to.equal(tokensToBuy * USDC_PARTS_EXCHANGE_RATE / USDC_MINT_PARTS_EXCHANGE_RATE);
     })
 
-    it ("Should buy test token for USDT", async function () {
+    it("Should buy test token for USDT", async function () {
       const tokensToBuy = 5;
       const { meetupToken, salesContract, usdt, } = await loadFixture(deployContracts);
       
@@ -160,7 +179,7 @@ describe ("Token Sales Test", function() {
       expect(await usdt.balanceOf(await salesContract.getAddress())).to.equal(contractExpectedUsdtBalance);
     })
 
-    it ("Should revert when the amount to buy is zero", async () => {
+    it("Should revert when the amount to buy is zero", async () => {
       const tokensToBuy = 0;
       const { salesContract, usdt, } = await loadFixture(deployContracts);
       
@@ -170,10 +189,10 @@ describe ("Token Sales Test", function() {
       // buy procedure 
       await usdt.connect(usdtOwner).approve(await salesContract.getAddress(), 10000000);
       await expect(salesContract.connect(usdtOwner).buyTokens(tokensToBuy, await usdt.getAddress(), {}))
-        .to.be.revertedWith("No tokens bought");
+        .to.be.revertedWith("Tokens value should be positive");
     });
 
-    it ("Should revert when the exchange rate is not set", async () => {
+    it("Should revert when the exchange rate is not set", async () => {
       const tokensToBuy = 10;
       const unsetPaymentTokenAddress = "0x60FaAe176336dAb62e284Fe19B885B095d29fB7F";
       const { salesContract, usdt, } = await loadFixture(deployContracts);
@@ -187,7 +206,7 @@ describe ("Token Sales Test", function() {
         .to.be.revertedWith("Payment token not allowed");
     });
 
-    it ("Should revert when the owner did not approve the tokens transfer", async () => {
+    it("Should revert when the owner did not approve the tokens transfer", async () => {
       const tokensToBuy = 10;
       const { salesContract, usdt, } = await loadFixture(deployContracts);
       
@@ -199,7 +218,7 @@ describe ("Token Sales Test", function() {
         .to.be.revertedWith("SafeERC20: low-level call failed");
     });
 
-    // it ("Should revert when the owner is 0x0", async function () {
+    // it("Should revert when the owner is 0x0", async function () {
     //   const tokensToBuy = 10;
     //   const { salesContract, usdt, mockContract } = await loadFixture(deployContracts);
       
@@ -216,14 +235,16 @@ describe ("Token Sales Test", function() {
     //     .to.be.revertedWith("ERC20: mint to the zero address");
     // });
 
-    it ("Should revert if sales contract is not the owner of the token contract", async () => {
+    it("Should revert if sales contract is not the owner of the token contract", async () => {
       const tokensToBuy = 10;
-      const { salesContract, usdt, meetupToken } = await loadFixture(deployContracts);
+      const { salesContract, usdt, meetupToken, owner } = await loadFixture(deployContracts);
       
       const usdtOwner = await ethers.getImpersonatedSigner("0x8091266bD21E86Ffe74D1F4ffcc4B27E3a7d4F61");
       await setBalance("0x8091266bD21E86Ffe74D1F4ffcc4B27E3a7d4F61", 10000000000000000000);
       
-      await meetupToken.transferOwnership(usdtOwner);
+      const salesContractSigner = await ethers.getImpersonatedSigner(await salesContract.getAddress());
+      await setBalance(salesContractSigner.address, 10000000000000000000);
+      await meetupToken.connect(salesContractSigner).transferOwnership(usdtOwner);
 
       // buy procedure 
       await usdt.connect(usdtOwner).approve(await salesContract.getAddress(), 10000000);
@@ -231,11 +252,11 @@ describe ("Token Sales Test", function() {
       // FAILS with the following error
       // Error: VM Exception while processing transaction: reverted with reason string 'Ownable: caller is not the owner'
       // Which is exactly what I'm expecting in my test 
-      await expect(salesContract.connect(usdtOwner).buyTokens(tokensToBuy, usdt, {}))
+      await expect(salesContract.connect(usdtOwner).buyTokens(tokensToBuy, await usdt.getAddress(), {}))
         .to.be.revertedWith("Ownable: caller is not the owner");
     });
 
-    it ("Should revert when buying after the end of the sale", async () => {
+    it("Should revert when buying after the end of the sale", async () => {
       const tokensToBuy = 1;
       const { salesContract, usdt, saleDurationDays: saleDurationDays} = await loadFixture(deployContracts);
       
@@ -250,43 +271,44 @@ describe ("Token Sales Test", function() {
     });
   })
 
-  describe("Buy tokens for ether cases", () => {
+  describe("Buy tokens for ether", () => {
     it("Should buy tokens", async () => {
       const tokensToBuy = 15;
 
-      const { meetupToken, salesContract } = await loadFixture(deployContracts);
+      const { meetupToken, salesContract, weth, } = await loadFixture(deployContracts);
 
       const owner = await ethers.getImpersonatedSigner("0xf7D13C7dBec85ff86Ee815f6dCbb3DEDAc78ca49");
       await setBalance("0xf7D13C7dBec85ff86Ee815f6dCbb3DEDAc78ca49", 10000000000000000000);
 
       const partsEther = 2;
       const partsToken = 3;
-      await salesContract.setPaymentEtherExchangeRate(partsEther, partsToken);
+      await salesContract.setPaymentTokenExchangeRate(weth, partsEther, partsToken);
 
       const tokensPrice = tokensToBuy / partsToken * partsEther;
       await salesContract.connect(owner)
         .buyTokensForEther(tokensToBuy, { value: tokensPrice});
 
-      expect(await meetupToken.balanceOf(owner.address)).to.equal(tokensToBuy);
+      expect(await meetupToken.balanceOf(owner)).to.equal(tokensToBuy, "Buyer doesn't have sufficient number of minter tokens");
+      expect(await weth.balanceOf(salesContract)).to.equal(tokensPrice, "Sales contract doesn't have sufficient amount of WETH");
     });
 
     it("Should revert when the number to buy is zero", async () => {
       const tokensToBuy = 0;
 
-      const { salesContract } = await loadFixture(deployContracts);
+      const { salesContract, weth, } = await loadFixture(deployContracts);
 
       const owner = await ethers.getImpersonatedSigner("0xf7D13C7dBec85ff86Ee815f6dCbb3DEDAc78ca49");
       await setBalance("0xf7D13C7dBec85ff86Ee815f6dCbb3DEDAc78ca49", 10000000000000000000);
 
       const partsEther = 2;
       const partsToken = 3;
-      await salesContract.setPaymentEtherExchangeRate(partsEther, partsToken);
+      await salesContract.setPaymentTokenExchangeRate(await weth.getAddress(), partsEther, partsToken);
 
       const tokensPrice = tokensToBuy / partsToken * partsEther;
 
       await expect(salesContract.connect(owner)
           .buyTokensForEther(tokensToBuy, { value: tokensPrice}))
-        .to.be.revertedWith("Invalid number of tokens to buy");
+        .to.be.revertedWith("Tokens value should be positive");
     });
 
     it("Should revert when payment with ether is not allowed", async () => {
@@ -304,20 +326,20 @@ describe ("Token Sales Test", function() {
 
       await expect(salesContract.connect(owner)
           .buyTokensForEther(tokensToBuy, { value: tokensPrice}))
-        .to.be.revertedWith("Payment with ether is not allowed");
+        .to.be.revertedWith("Payment token not allowed");
     });
 
     it("Should revert when the sale has ended", async () => {
       const tokensToBuy = 15;
 
-      const { salesContract, saleDurationDays: saleDurationDays } = await loadFixture(deployContracts);
+      const { salesContract, saleDurationDays: saleDurationDays, weth, } = await loadFixture(deployContracts);
 
       const owner = await ethers.getImpersonatedSigner("0xf7D13C7dBec85ff86Ee815f6dCbb3DEDAc78ca49");
       await setBalance("0xf7D13C7dBec85ff86Ee815f6dCbb3DEDAc78ca49", 10000000000000000000);
 
       const partsEther = 2;
       const partsToken = 3;
-      await salesContract.setPaymentEtherExchangeRate(partsEther, partsToken);
+      await salesContract.setPaymentTokenExchangeRate(weth, partsEther, partsToken);
 
       const tokensPrice = tokensToBuy / partsToken * partsEther;
 
@@ -331,45 +353,54 @@ describe ("Token Sales Test", function() {
     it("Should revert when the number of ether does not correspond the price of the tokens", async () => {
       const tokensToBuy = 15;
 
-      const { salesContract } = await loadFixture(deployContracts);
+      const { salesContract, weth, } = await loadFixture(deployContracts);
 
       const owner = await ethers.getImpersonatedSigner("0xf7D13C7dBec85ff86Ee815f6dCbb3DEDAc78ca49");
       await setBalance("0xf7D13C7dBec85ff86Ee815f6dCbb3DEDAc78ca49", 10000000000000000000);
 
       const partsEther = 2;
       const partsToken = 3;
-      await salesContract.setPaymentEtherExchangeRate(partsEther, partsToken);
+      await salesContract.setPaymentTokenExchangeRate(weth, partsEther, partsToken);
 
       const tokensPrice = tokensToBuy / partsToken * partsEther + 1;
 
       await expect(salesContract.connect(owner)
           .buyTokensForEther(tokensToBuy, { value: tokensPrice}))
-        .to.be.revertedWith("Incorrect value of ether for the specified number of tokens");
+        .to.be.revertedWithCustomError(salesContract, "BadEthValue");
     });
   });
 
   describe("Withdraw", () => {
     it ("Should withdraw USDT", async () => {
       const tokensToBuy = 5;
-      const { owner, salesContract, usdt, } = await loadFixture(deployContracts);
+      const { owner, salesContract, usdt, saleDurationDays, } = await loadFixture(deployContracts);
       
       const usdtOwner = await ethers.getImpersonatedSigner("0x8091266bD21E86Ffe74D1F4ffcc4B27E3a7d4F61");
       await setBalance("0x8091266bD21E86Ffe74D1F4ffcc4B27E3a7d4F61", 10000000000000000000);
 
       // buy procedure 
-      await usdt.connect(usdtOwner).approve(await salesContract.getAddress(), 10000000);
-      await salesContract.connect(usdtOwner).buyTokens(tokensToBuy, await usdt.getAddress(), {});
-      await salesContract.withdraw(await usdt.getAddress());
+      await usdt.connect(usdtOwner).approve(salesContract, 10000000);
+      await salesContract.connect(usdtOwner).buyTokens(tokensToBuy, usdt, {});
+      await time.increase(saleDurationDays * 24 * 3600);
+      await salesContract.withdraw(usdt);
 
       const contractExpectedUsdtBalance = Math.floor(tokensToBuy * USDT_PARTS_EXCHANGE_RATE / USDT_MINT_PARTS_EXCHANGE_RATE);
       expect(await usdt.balanceOf(owner.address)).to.equal(contractExpectedUsdtBalance);
     })
 
-    it ("Should revert if the token has not been registered", async () => {
-      const { salesContract, } = await loadFixture(deployContracts);
+    it ("Should revert if the contract's token balance is zero", async () => {
+      const { salesContract, saleDurationDays, } = await loadFixture(deployContracts);
       const golem = "0xa74476443119A942dE498590Fe1f2454d7D4aC0d";
       
-      await expect(salesContract.withdraw(golem)).to.be.revertedWith("Such a token was not registered");
+      await time.increase(saleDurationDays * 24 * 3600);
+      
+      await expect(salesContract.withdraw(golem)).to.be.revertedWith("SafeERC20: ERC20 operation did not succeed");
+    })
+
+    it ("Should revert when the sale is still ongoing", async () => {
+      const { salesContract, usdt, } = await loadFixture(deployContracts);
+      
+      await expect(salesContract.withdraw(usdt)).to.be.revertedWith("Sale is still ongoing");
     })
   })
 })
