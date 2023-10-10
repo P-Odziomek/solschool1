@@ -152,6 +152,9 @@ contract SimpleSaleContract is Ownable {
             revert BadEthValue();
         }
 
+        // This doesn't make sense because we are approving a transfer to ourselves o_O
+        // Should we remove the _transferFrom() part from the _buyTokens 
+        // And only use the _mint() part?
         Weth(address(WETH)).deposit{value: msg.value}();
         WETH.approve(address(this), msg.value);
         _buyTokens(_tokensToBuy, WETH);
