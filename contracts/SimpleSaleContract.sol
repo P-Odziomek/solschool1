@@ -7,11 +7,7 @@ import "./MeetupERC20Token.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "hardhat/console.sol";
-
-interface Weth is IERC20 {
-    function deposit() external payable;
-    function withdraw(uint wad) external;
-}
+import "./interfaces/Weth.sol";
 
 /**
  * @title Solidity Code School sale contract
@@ -31,8 +27,6 @@ contract SimpleSaleContract is Ownable {
     IERC20 internal constant WETH = IERC20(address(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2));
     uint256 public immutable cutoffTimestamp;
     MeetupERC20Token public mintableToken;
-    // is it better to specity the default visibility modifier public or omit it?
-    // OMG because it doesn't have the public keyword its getter is absent in the abi!!!
     mapping(IERC20 => ExchangeRate) public paymentTokensExchangeRate;
     ExchangeRate public etherExchangeRate;
 
@@ -77,7 +71,6 @@ contract SimpleSaleContract is Ownable {
      * @param _paymentToken the token that will be used for payment
      */
     function buyTokens(uint256 _tokensToBuy, IERC20 _paymentToken) external forSale positiveTokens(_tokensToBuy) rateSet(_paymentToken) {
-        require(_tokensToBuy != 0, "No tokens bought");
         _buyTokens(_tokensToBuy, _paymentToken);
     }
 
@@ -122,7 +115,6 @@ contract SimpleSaleContract is Ownable {
      * @param _paymentToken address of token to be unset
      */
     function unsetPaymentTokenExchangeRate(IERC20 _paymentToken) external onlyOwner {
-        // Is it cheaper to call delete than x.a=0, x.b=0?
         delete paymentTokensExchangeRate[_paymentToken];
     }
 
@@ -152,11 +144,8 @@ contract SimpleSaleContract is Ownable {
             revert BadEthValue();
         }
 
-        // This doesn't make sense because we are approving a transfer to ourselves o_O
-        // Should we remove the _transferFrom() part from the _buyTokens 
-        // And only use the _mint() part?
         Weth(address(WETH)).deposit{value: msg.value}();
-        WETH.approve(address(this), msg.value);
-        _buyTokens(_tokensToBuy, WETH);
+        mintableToken.mint(msg.sender, _tokensToBuy);
+        emit TokenSaleCompleted(msg.sender, _tokensToBuy, WETH, etherToPay);
     }
 }

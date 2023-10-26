@@ -22,9 +22,8 @@ const WETH_MAINNET_CONTRACT_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc
 describe ("Token Sales Test", function() {
 
   async function deployContracts() {
-    // Is it OK to use ether units in place of number of tokens?
     const [ owner ] = await ethers.getSigners();
-    const cap = ethers.parseEther("2000000");
+    const cap = 2000000n*BigInt(10n ** 18n);
     const saleDurationDays = 60;
     const meetupToken = await ethers.deployContract("MeetupERC20Token", [cap]);
     const salesContract = await ethers.deployContract("SimpleSaleContract", [await meetupToken.getAddress(), saleDurationDays]);
@@ -248,10 +247,6 @@ describe ("Token Sales Test", function() {
 
       // buy procedure 
       await usdt.connect(usdtOwner).approve(await salesContract.getAddress(), 10000000);
-
-      // FAILS with the following error
-      // Error: VM Exception while processing transaction: reverted with reason string 'Ownable: caller is not the owner'
-      // Which is exactly what I'm expecting in my test 
       await expect(salesContract.connect(usdtOwner).buyTokens(tokensToBuy, await usdt.getAddress(), {}))
         .to.be.revertedWith("Ownable: caller is not the owner");
     });
@@ -374,6 +369,8 @@ describe ("Token Sales Test", function() {
     it ("Should withdraw USDT", async () => {
       const tokensToBuy = 5;
       const { owner, salesContract, usdt, saleDurationDays, } = await loadFixture(deployContracts);
+
+      const initialBalance = await usdt.balanceOf(owner.address);
       
       const usdtOwner = await ethers.getImpersonatedSigner("0x8091266bD21E86Ffe74D1F4ffcc4B27E3a7d4F61");
       await setBalance("0x8091266bD21E86Ffe74D1F4ffcc4B27E3a7d4F61", 10000000000000000000);
@@ -382,10 +379,12 @@ describe ("Token Sales Test", function() {
       await usdt.connect(usdtOwner).approve(salesContract, 10000000);
       await salesContract.connect(usdtOwner).buyTokens(tokensToBuy, usdt, {});
       await time.increase(saleDurationDays * 24 * 3600);
+      const contractExpectedUsdtBalance = BigInt(Math.floor(tokensToBuy * USDT_PARTS_EXCHANGE_RATE / USDT_MINT_PARTS_EXCHANGE_RATE));
+      expect(await usdt.balanceOf(await salesContract.getAddress())).to.equal(contractExpectedUsdtBalance);
+
       await salesContract.withdraw(usdt);
 
-      const contractExpectedUsdtBalance = Math.floor(tokensToBuy * USDT_PARTS_EXCHANGE_RATE / USDT_MINT_PARTS_EXCHANGE_RATE);
-      expect(await usdt.balanceOf(owner.address)).to.equal(contractExpectedUsdtBalance);
+      expect(await usdt.balanceOf(owner.address)-initialBalance).to.equal(contractExpectedUsdtBalance);
     })
 
     it ("Should revert if the contract's token balance is zero", async () => {
