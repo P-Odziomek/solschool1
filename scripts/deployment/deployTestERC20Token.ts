@@ -1,8 +1,9 @@
 import { ethers } from "hardhat";
 
-export async function deployTestERC20Token() {
-  const token = await ethers.deployContract("MeetupERC20Token");
+export async function deployTestERC20Token(cap: string) {
+  const token = await ethers.deployContract("MeetupERC20Token", [ethers.parseEther(cap)]);
   await token.waitForDeployment();
+  process.env.TOKEN_ADDRESS = await token.getAddress();
 
   return token;
 }
@@ -10,7 +11,7 @@ export async function deployTestERC20Token() {
 async function main() {
   console.log("Deploying MeetupERC20Token...");
   
-  const token = await deployTestERC20Token();
+  const token = await deployTestERC20Token(process.env.CAP as string);
   
   console.log("Successfully deployed!");
   console.log(await token.getAddress());
